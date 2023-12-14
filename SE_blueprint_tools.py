@@ -1,5 +1,5 @@
 import xml.etree.ElementTree as et
-import os,colorsys
+import os,colorsys,html
 #=====#
 DEFAULT_BLUEPRINT_NAME = "name"
 DEFAULT_AUTHOR_NAME = "someone"
@@ -7,16 +7,31 @@ DEFAULT_SKIN = "Weldless"
 DEFAULT_GRID_SIZE = "Large"
 DEFAULT_BLOCK_TYPE = "BlockArmorBlock"
 DEFAULT_BLOCK_DEFINITION = "CubeBlock"
+DEFAULT_BLOCK_ROTATION = [0,0]
 #=====#
 skin_types = ['None', 'Battered_Armor', 'CarbonFibre_Armor', 'Clean_Armor', 'Concrete_Armor', 'Corrugated', 'CowMooFlage_Armor', 'DigitalCamouflage_Armor', 'Disco_Armor', 'Dust_Armor', 'Frozen_Armor', 'Glamour_Armor', 'Hazard_Armor', 'Heavy_Rust_Armor', 'Mossy_Armor', 'Neon_Colorable_Lights', 'Neon_Colorable_Surface', 'Plastic', 'Retrofuture_Armor', 'Rusty_Armor', 'SciFi_Armor', 'Wartorn', 'Weldless', 'Wood_Armor', 'WoodlandCamo_Armor']
-def add_tag(element,tag):
+
+def add_tag(element,tag,replace_existing=False,use_html_escape = True):
     name,attrib,text = tag
-    tag = et.SubElement(element,name)
+
+    if use_html_escape:
+        name = html.escape(name)
+        if isinstance(attrib,dict):
+            attrib = {html.escape(k):html.escape(v) for k,v in attrib.items()}
+        text = html.escape(text)
+
+    if replace_existing:
+        new_tag = element.find(name)
+        if new_tag is None:
+            new_tag = et.SubElement(element,name)
+    else:
+        new_tag = et.SubElement(element,name)
     if attrib:
-        tag.attrib = attrib
+        new_tag.attrib = attrib
     if text:
-        tag.text = text
-    return tag
+        new_tag.text = text
+    return new_tag
+
 #==creating blueprint==#
 
 def rgb_to_sehsv(c):
@@ -32,17 +47,38 @@ class block:
     def __init__(self,grid,pos,color,**kwargs):
         kwargs = kwargs["kwargs"]
         skin = kwargs.get("skin",DEFAULT_SKIN)
-        block_type,block_definition = kwargs.get("type",(DEFAULT_BLOCK_TYPE,DEFAULT_BLOCK_DEFINITION))
+        block_type = kwargs.get("type",DEFAULT_BLOCK_TYPE)
+        block_definition = kwargs.get("definition",DEFAULT_BLOCK_DEFINITION)
+        rotation = kwargs.get("rotation",DEFAULT_BLOCK_ROTATION)
         size = kwargs.get("size",grid.grid_size)
-        new_block = add_tag(grid.blocks,["MyObjectBuilder_CubeBlock",{"xsi:type":f"MyObjectBuilder_{block_definition}"},""])
-        add_tag(new_block,["SubtypeName","",size+block_type])
+        custom_name = kwargs.get("name",None)
+
+        self.block_tag = add_tag(grid.blocks,["MyObjectBuilder_CubeBlock",{"xsi:type":f"MyObjectBuilder_{block_definition}"},""])
+
+        add_tag(self.block_tag,["SubtypeName","",size+block_type])
         axes = ["x","y","z"]
-        add_tag(new_block,["Min",{ax:str(pos[idx]) for idx,ax in enumerate(axes)},""])
+        add_tag(self.block_tag,["Min",{ax:str(pos[idx]) for idx,ax in enumerate(axes)},""])
         color = rgb_to_sehsv(color)
-        add_tag(new_block,["ColorMaskHSV",{ax:str(color[idx]) for idx,ax in enumerate(axes)},""])
+        add_tag(self.block_tag,["ColorMaskHSV",{ax:str(color[idx]) for idx,ax in enumerate(axes)},""])
+        self.set_rotation(rotation)
         if skin in skin_types:
-            add_tag(new_block,["SkinSubtypeId","",skin])
-    
+            add_tag(self.block_tag,["SkinSubtypeId","",skin])
+        if custom_name is not None:
+            add_tag(self.block_tag,["CustomName",{},custom_name])
+    def set_rotation(self,r):
+        x,y = r
+        block_orientation = self.block_tag.find("BlockOrientation")
+        directions_horizontal = ["Forward","Right","Backward","Left"]
+        directions_vertical = ["Up","Forward","Down","Backward"]
+        dir = {
+        "Forward": directions_horizontal[x%4],
+        "Up": directions_vertical[y%4]
+        }
+
+        if block_orientation is not None:
+            block_orientation.attrib = dir
+        else:
+            add_tag(self.block_tag,["BlockOrientation",dir,""])
 class cube_grid:
     def __init__(self,bp_file,**kwargs):
         bp = bp_file.bp
@@ -91,12 +127,3 @@ class blueprint_file:
         sbcb5_path = os.path.join(output_path,"bp.sbcB5")
         if os.path.isfile(sbcb5_path) and remove_sbcb5:
             os.remove(sbcb5_path)
-
-def set_rotation(block,a,b):
-    directions_horizontal = ["Forward","Right","Backward","Left"]
-    directions_vertical = ["Up","Forward","Down","Backward"]
-    dir = {
-    "Forward": directions_horizontal[a%len(directions_horizontal)],
-    "Up": directions_vertical[b%len(directions_vertical)]
-    }
-    add_tag(block,["BlockOrientation",dir,""])
